@@ -7,6 +7,8 @@ requests to the configured API.
 The project is primarily designed and tested on Linux, while the release pipeline also produces Windows and macOS
 installers.
 
+![App preview](./build/d3vtools-app-preview.gif)
+
 ## Current state
 
 The application currently provides:
