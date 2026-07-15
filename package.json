@@ -60,8 +60,7 @@
       "category": "Utility",
       "target": [
         "deb",
-        "AppImage",
-        "snap"
+        "AppImage"
       ]
     },
     "win": {

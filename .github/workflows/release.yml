@@ -49,11 +49,10 @@ jobs:
         include:
           - name: Linux
             os: ubuntu-latest
-            target: --linux deb AppImage snap
+            target: --linux deb AppImage
             artifacts: |
               dist/*.deb
               dist/*.AppImage
-              dist/*.snap
           - name: Windows
             os: windows-latest
             target: --win nsis
@@ -74,13 +73,23 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Cache Electron Builder downloads
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-builder-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-builder-
+
       - name: Install Linux packaging tools
         if: runner.os == 'Linux'
         shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y libsecret-1-dev pkg-config build-essential
-          sudo snap install snapcraft --classic
 
       - name: Install dependencies
         run: npm ci
