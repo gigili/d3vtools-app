@@ -49,4 +49,5 @@ export interface UserConfig {
   windowWidth: number
   windowHeight: number
   alwaysOnTop: boolean
+	startOnStartup: boolean;
 }

@@ -1,33 +1,215 @@
 /// <reference path="../preload/index.d.ts" />
-import { searchCatalog } from '../search/catalog'
-import type { ApiResult, RateLimitInfo, ToolDefinition } from '../shared/types'
-import { displayValue, inputModeFor, isRecord, outputFileFor, parseStructuredResult, presentationFor, unwrapResult } from './format'
-import './style.css'
+import {searchCatalog} from "../search/catalog";
+import type {ApiResult, AppSettings, RateLimitInfo, ToolDefinition, UserConfig} from "../shared/types";
+import {
+  displayValue,
+  inputModeFor,
+  isRecord,
+  outputFileFor,
+  parseStructuredResult,
+  presentationFor,
+  unwrapResult
+} from "./format";
+import {acceleratorForKeyEvent} from "./shortcut";
+import "./style.css";
 
 let catalog: ToolDefinition[] = []
 let selected = 0
+let windowResizeRequest = 0;
+const quotaCacheKey = "d3vtools:last-rate-limit";
+const quotaDefaultText = "Requests: run a tool to check quota";
+let cachedQuota: (RateLimitInfo & { observedAt: number }) | null = null;
+let quotaTimer: number | undefined;
 const search = document.querySelector<HTMLInputElement>('#search')!
 const results = document.querySelector<HTMLElement>('#results')!
 const status = document.querySelector<HTMLElement>('#status')!
 const version = document.querySelector<HTMLElement>('#app-version')!
 const quota = document.querySelector<HTMLElement>('#quota')!
 const poweredBy = document.querySelector<HTMLButtonElement>('#powered-by')!
+const settingsButton = document.querySelector<HTMLButtonElement>("#settings-button")!;
+const settingsModal = document.querySelector<HTMLElement>("#settings-modal")!;
+const settingsForm = document.querySelector<HTMLFormElement>("#settings-form")!;
+const settingsClose = document.querySelector<HTMLButtonElement>("#settings-close")!;
+const settingsCancel = document.querySelector<HTMLButtonElement>("#settings-cancel")!;
+const settingsError = document.querySelector<HTMLElement>("#settings-error")!;
+const settingsApiKey = document.querySelector<HTMLInputElement>("#settings-api-key")!;
+const settingsApiKeyStatus = document.querySelector<HTMLElement>("#settings-api-key-status")!;
+const settingsRemoveKey = document.querySelector<HTMLButtonElement>("#settings-remove-key")!;
+const settingsShortcut = document.querySelector<HTMLInputElement>("#settings-shortcut")!;
+const settingsOpenThemes = document.querySelector<HTMLButtonElement>("#settings-open-themes")!;
 
 function button(label: string, className = ''): HTMLButtonElement {
   const element = document.createElement('button'); element.type = 'button'; element.className = className; element.textContent = label; return element
 }
 
+async function resizeForTool(): Promise<void> {
+  const request = ++windowResizeRequest;
+  const config = await window.d3vtools.getConfig();
+  if (request === windowResizeRequest) await window.d3vtools.resizeWindow(Math.max(config.windowWidth, 1000), Math.max(config.windowHeight, 680));
+}
+
+async function restoreConfiguredWindowSize(): Promise<void> {
+  const request = ++windowResizeRequest;
+  const config = await window.d3vtools.getConfig();
+  if (request === windowResizeRequest) await window.d3vtools.resizeWindow(config.windowWidth, config.windowHeight);
+}
+
 function render(): void {
   const matches = searchCatalog(catalog, search.value)
-  selected = Math.min(selected, Math.max(0, matches.length - 1))
-  results.replaceChildren(...matches.slice(0, 12).map((tool, index) => {
+  const visibleMatches = matches.slice(0, 12);
+  selected = Math.min(selected, Math.max(0, visibleMatches.length - 1));
+  const items = visibleMatches.map((tool, index) => {
     const item = button('', `result ${index === selected ? 'selected' : ''}`)
     const name = document.createElement('strong'); name.textContent = tool.name
     const description = document.createElement('small'); description.textContent = tool.description
     const meta = document.createElement('span'); meta.className = 'result-meta'; meta.textContent = `${tool.category} · ${tool.inputType}`
-    item.append(name, description, meta); item.onclick = () => openTool(tool); return item
-  }))
+    item.append(name, description, meta);
+    item.onclick = () => openTool(tool);
+    return item;
+  })
+  results.replaceChildren(...items);
+  items[selected]?.scrollIntoView({block: "nearest"});
   status.textContent = catalog.length ? `${matches.length} tools · Enter to open` : 'Catalog unavailable — check your connection or API URL'
+}
+
+function leaveTool(): void {
+  render();
+  void restoreConfiguredWindowSize();
+  search.focus();
+}
+
+async function openSettings(): Promise<void> {
+  const [appSettings, userConfig, hasApiKey, themes] = await Promise.all([window.d3vtools.getSettings(), window.d3vtools.getConfig(), window.d3vtools.hasApiKey(), window.d3vtools.getThemes()]);
+  setSettingsField("settings-api-url", appSettings.apiBaseUrl);
+  setSettingsField("settings-shortcut", appSettings.shortcut);
+  settingsShortcut.classList.remove("recording", "recorded");
+  const themeSelect = document.querySelector<HTMLSelectElement>("#settings-theme")!;
+  themeSelect.replaceChildren(...themes.map((theme) => new Option(theme, theme)));
+  if (!themes.includes(userConfig.theme)) themeSelect.append(new Option(`${userConfig.theme} (file missing)`, userConfig.theme));
+  themeSelect.value = userConfig.theme;
+  setSettingsField("settings-width", String(userConfig.windowWidth));
+  setSettingsField("settings-height", String(userConfig.windowHeight));
+  document.querySelector<HTMLInputElement>("#settings-always-on-top")!.checked = userConfig.alwaysOnTop;
+  document.querySelector<HTMLInputElement>("#settings-start-on-startup")!.checked = userConfig.startOnStartup;
+  settingsApiKey.value = "";
+  settingsApiKeyStatus.textContent = hasApiKey ? "A key is securely stored in the system credential store." : "No API key configured; anonymous limits apply.";
+  settingsRemoveKey.disabled = !hasApiKey;
+  settingsError.textContent = "";
+  settingsModal.hidden = false;
+  await window.d3vtools.setShortcutRecording(true);
+  document.querySelector<HTMLInputElement>("#settings-api-url")!.focus();
+}
+
+function closeSettings(): void {
+  settingsModal.hidden = true;
+  search.focus();
+  void window.d3vtools.setShortcutRecording(false);
+}
+
+function setSettingsField(id: string, value: string): void {
+  document.querySelector<HTMLInputElement | HTMLSelectElement>(`#${id}`)!.value = value;
+}
+
+settingsShortcut.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    settingsShortcut.blur();
+    return;
+  }
+  if (event.key === "Backspace" || event.key === "Delete") {
+    event.preventDefault();
+    settingsShortcut.value = "";
+    return;
+  }
+  const accelerator = acceleratorForKeyEvent(event);
+  if (!accelerator) {
+    event.preventDefault();
+    return;
+  }
+  event.preventDefault();
+  settingsShortcut.value = accelerator;
+  settingsShortcut.classList.add("recorded");
+});
+settingsShortcut.addEventListener("focus", () => {
+  settingsShortcut.classList.add("recording");
+  settingsShortcut.placeholder = "Press keys now…";
+});
+settingsShortcut.addEventListener("blur", () => {
+  settingsShortcut.classList.remove("recording");
+  settingsShortcut.placeholder = "Press a key combination…";
+});
+
+settingsButton.onclick = () => {
+  void openSettings();
+};
+settingsOpenThemes.onclick = () => {
+  void window.d3vtools.openThemesDirectory().catch((error) => {
+    settingsError.textContent = error instanceof Error ? error.message : "Could not open themes directory.";
+  });
+};
+settingsClose.onclick = closeSettings;
+settingsCancel.onclick = closeSettings;
+settingsModal.onclick = (event) => {
+  if (event.target === settingsModal) closeSettings();
+};
+settingsRemoveKey.onclick = async () => {
+  await window.d3vtools.removeApiKey();
+  settingsApiKey.value = "";
+  settingsApiKeyStatus.textContent = "No API key configured; anonymous limits apply.";
+  settingsRemoveKey.disabled = true;
+};
+settingsForm.onsubmit = async (event) => {
+  event.preventDefault();
+  settingsError.textContent = "";
+  const apiBaseUrl = document.querySelector<HTMLInputElement>("#settings-api-url")!.value.trim();
+  try {
+    const parsed = new URL(apiBaseUrl);
+    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("API base URL must use http or https.");
+  } catch {
+    settingsError.textContent = "Enter a valid http:// or https:// API base URL.";
+    return;
+  }
+  const shortcut = settingsShortcut.value.trim();
+  if (!shortcut) {
+    settingsError.textContent = "Press a key combination for the global shortcut.";
+    settingsShortcut.focus();
+    return;
+  }
+  const appSettings: AppSettings = {apiBaseUrl, shortcut};
+  const userConfig: UserConfig = {
+    theme: document.querySelector<HTMLInputElement>("#settings-theme")!.value.trim(),
+    windowWidth: Number(document.querySelector<HTMLInputElement>("#settings-width")!.value),
+    windowHeight: Number(document.querySelector<HTMLInputElement>("#settings-height")!.value),
+    alwaysOnTop: document.querySelector<HTMLInputElement>("#settings-always-on-top")!.checked,
+    startOnStartup: document.querySelector<HTMLInputElement>("#settings-start-on-startup")!.checked,
+  };
+  const submit = settingsForm.querySelector<HTMLButtonElement>("button[type=\"submit\"]")!;
+  submit.disabled = true;
+  try {
+    await window.d3vtools.saveSettings(appSettings);
+    if (settingsApiKey.value.trim()) await window.d3vtools.setApiKey(settingsApiKey.value.trim());
+    await window.d3vtools.saveConfig(userConfig);
+    closeSettings();
+    await applyTheme();
+    catalog = await window.d3vtools.getCatalog();
+    render();
+  } catch (error) {
+    settingsError.textContent = error instanceof Error ? error.message : "Could not save settings.";
+  } finally {
+    submit.disabled = false;
+  }
+};
+
+async function applyTheme(): Promise<void> {
+  const theme = await window.d3vtools.getTheme();
+  if (!theme) return;
+  let style = document.head.querySelector<HTMLStyleElement>("style[data-user-theme]");
+  if (!style) {
+    style = document.createElement("style");
+    style.dataset.userTheme = "true";
+    document.head.append(style);
+  }
+  style.textContent = theme;
 }
 
 function openTool(tool: ToolDefinition): void {
@@ -35,19 +217,24 @@ function openTool(tool: ToolDefinition): void {
   const inputMode = inputModeFor(tool)
   const shell = document.createElement('article'); shell.className = 'tool-shell'
   const header = document.createElement('header'); header.className = 'tool-header'
-  const back = button('←', 'icon-button'); back.title = 'Back to tools'; back.onclick = render
+  const back = button("←", "icon-button");
+  back.title = "Back to tools";
+  back.onclick = leaveTool;
   const heading = document.createElement('div'); heading.className = 'tool-heading'
   const title = document.createElement('h2'); title.textContent = tool.name
   const description = document.createElement('p'); description.textContent = tool.description
   const badge = document.createElement('span'); badge.className = 'badge'; badge.textContent = `${tool.category} · ${inputMode} input · ${presentation} output`
-  const endpoint = document.createElement('span'); endpoint.className = 'endpoint'; endpoint.textContent = 'API: loading…'
-  heading.append(title, description, badge, endpoint); header.append(back, heading)
-  void window.d3vtools.getSettings().then((config) => { try { endpoint.textContent = `API: ${new URL(config.apiBaseUrl).host}` } catch { endpoint.textContent = 'API: invalid URL' } })
+  heading.append(title, description, badge);
+  header.append(back, heading);
 
   const workspace = document.createElement('div'); workspace.className = 'workspace'
   const inputPane = document.createElement('section'); inputPane.className = 'pane input-pane'
   const inputLabel = document.createElement('label'); inputLabel.className = 'pane-title'; inputLabel.textContent = 'Input'
-  const input = document.createElement('textarea'); input.id = 'tool-input'; input.spellcheck = false; input.placeholder = inputPlaceholder(tool)
+  const input = document.createElement("textarea");
+  input.id = "tool-input";
+  input.spellcheck = false;
+  input.value = "";
+  input.placeholder = inputPlaceholder(tool).trimStart();
   inputPane.append(inputLabel)
   if (inputMode === 'file' || inputMode === 'mixed') {
     const fileRow = document.createElement('div'); fileRow.className = 'file-row'
@@ -79,11 +266,16 @@ function openTool(tool: ToolDefinition): void {
       const response = await window.d3vtools.execute(tool.category, tool.slug, { input: input.value }) as ApiResult
       renderRateLimit(response.meta?.rate_limit)
       renderOutput(output, parseStructuredResult(unwrapResult(response)), presentation, tool)
-    } catch (error) { output.className = 'output error'; output.textContent = error instanceof Error ? error.message : 'Request failed' }
+    } catch (error) {
+      output.className = "output error";
+      if (isRateLimitError(error)) await renderRateLimitError(output);
+      else output.textContent = friendlyErrorMessage(error);
+    }
     finally { run.disabled = false; run.textContent = 'Run' }
   }
   run.onclick = () => void execute()
   input.addEventListener('keydown', (event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') void execute() })
+  void resizeForTool();
 }
 
 function inputPlaceholder(tool: ToolDefinition): string {
@@ -99,13 +291,86 @@ function renderRateLimit(value: unknown): void {
   if (!value || typeof value !== 'object') return
   const rate = value as RateLimitInfo
   if (typeof rate.remaining !== 'number' || typeof rate.limit !== 'number') return
-  const reset = typeof rate.resets_in_seconds === 'number' ? ` · resets in ${formatDuration(rate.resets_in_seconds)}` : ''
-  quota.textContent = `${rate.remaining}/${rate.limit} requests left${rate.tier ? ` · ${rate.tier}` : ''}${reset}`
+  cachedQuota = {...rate, observedAt: Date.now()};
+  try {
+    localStorage.setItem(quotaCacheKey, JSON.stringify(cachedQuota));
+  } catch { /* storage may be unavailable */
+  }
+  updateQuotaDisplay();
 }
 
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`
   return `${Math.ceil(seconds / 60)}m`
+}
+
+function friendlyErrorMessage(error: unknown): string {
+  const rawMessage = error instanceof Error ? error.message : "Request failed";
+  if (/\b429\b|rate limit|too many requests/i.test(rawMessage)) {
+    const resetIn = cachedQuota?.resets_in_seconds === undefined ? null : Math.max(0, cachedQuota.resets_in_seconds - Math.floor((Date.now() - cachedQuota.observedAt) / 1000));
+    return resetIn !== null && resetIn > 0
+        ? `You’ve reached your usage limit. Please try again in ${formatDuration(resetIn)}.`
+        : "You’ve reached your usage limit. Please try again when the limit resets.";
+  }
+  return rawMessage.replace(/^Error invoking remote method '[^']+': Error:\s*/, "");
+}
+
+function isRateLimitError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : "";
+  return /\b429\b|rate limit|too many requests/i.test(message);
+}
+
+async function renderRateLimitError(container: HTMLElement): Promise<void> {
+  const hasApiKey = await window.d3vtools.hasApiKey().catch(() => false);
+  const message = document.createElement("p");
+  message.textContent = friendlyErrorMessage(new Error("429"));
+  const action = button(hasApiKey ? "View plans and increase limits" : "Sign up for higher limits", "primary-button");
+  action.onclick = () => {
+    void window.d3vtools.openAccount(hasApiKey ? "billing" : "app");
+  };
+  container.replaceChildren(message, action);
+}
+
+function updateQuotaDisplay(): void {
+  if (!cachedQuota) return;
+  if (quotaTimer !== undefined) {
+    window.clearInterval(quotaTimer);
+    quotaTimer = undefined;
+  }
+  const elapsed = Math.max(0, Math.floor((Date.now() - cachedQuota.observedAt) / 1000));
+  const resetIn = typeof cachedQuota.resets_in_seconds === "number" ? Math.max(0, cachedQuota.resets_in_seconds - elapsed) : null;
+  if (cachedQuota.remaining <= 0 && resetIn === 0) {
+    cachedQuota = null;
+    try {
+      localStorage.removeItem(quotaCacheKey);
+    } catch { /* storage may be unavailable */
+    }
+    quota.classList.remove("quota-warning");
+    quota.textContent = quotaDefaultText;
+    return;
+  }
+  const warning = cachedQuota.remaining <= 0;
+  quota.classList.toggle("quota-warning", warning);
+  if (warning) {
+    quota.textContent = resetIn === null ? "Usage limit reached" : `Usage limit reached · resets in ${formatDuration(resetIn)}`;
+  } else {
+    const reset = resetIn === null || resetIn === 0 ? "" : ` · resets in ${formatDuration(resetIn)}`;
+    quota.textContent = `${cachedQuota.remaining}/${cachedQuota.limit} requests left${cachedQuota.tier ? ` · ${cachedQuota.tier}` : ""}${reset}`;
+  }
+  if (resetIn !== null && resetIn > 0) quotaTimer = window.setInterval(updateQuotaDisplay, 1000);
+}
+
+function restoreCachedQuota(): void {
+  try {
+    const saved = JSON.parse(localStorage.getItem(quotaCacheKey) ?? "null") as (RateLimitInfo & {
+      observedAt?: number
+    }) | null;
+    if (saved && typeof saved.remaining === "number" && typeof saved.limit === "number" && typeof saved.observedAt === "number") {
+      cachedQuota = saved as RateLimitInfo & { observedAt: number };
+      updateQuotaDisplay();
+    }
+  } catch { /* ignore malformed or unavailable cache */
+  }
 }
 
 function renderOutput(container: HTMLElement, value: unknown, presentation: string, tool: ToolDefinition): void {
@@ -193,8 +458,50 @@ function renderTable(rows: Array<Record<string, unknown>>): HTMLElement {
 
 function escapeHtml(value: string): string { return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]!) }
 search.addEventListener('input', () => { selected = 0; render() })
-document.addEventListener('keydown', (event) => { if (event.key === 'Escape') void window.d3vtools.hideWindow() })
-search.addEventListener('keydown', (event) => { const count = searchCatalog(catalog, search.value).length; if (event.key === 'ArrowDown') { selected = Math.min(selected + 1, count - 1); render() } if (event.key === 'ArrowUp') { selected = Math.max(selected - 1, 0); render() } if (event.key === 'Enter') { const tool = searchCatalog(catalog, search.value)[selected]; if (tool) openTool(tool) } })
-window.d3vtools.getTheme().then((theme) => { if (theme) { const style = document.createElement('style'); style.dataset.userTheme = 'true'; style.textContent = theme; document.head.append(style) } }).finally(() => { window.d3vtools.getCatalog().then((value) => { catalog = value; render() }).catch(() => render()) })
+restoreCachedQuota();
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    if (!settingsModal.hidden) closeSettings(); else void window.d3vtools.hideWindow();
+  }
+  if (settingsModal.hidden && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+    event.preventDefault();
+    void openSettings();
+  }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+    event.preventDefault();
+    search.focus();
+    search.select();
+  }
+  if (event.altKey && event.key === "ArrowLeft" && results.querySelector(".tool-shell")) {
+    event.preventDefault();
+    leaveTool();
+  }
+});
+search.addEventListener("keydown", (event) => {
+  const count = Math.min(searchCatalog(catalog, search.value).length, 12);
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    selected = Math.min(selected + 1, count - 1);
+    render();
+  }
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    selected = Math.max(selected - 1, 0);
+    render();
+  }
+  if (event.key === "Enter") {
+    const tool = searchCatalog(catalog, search.value)[selected];
+    if (tool) {
+      event.preventDefault();
+      openTool(tool);
+    }
+  }
+});
+applyTheme().finally(() => {
+  window.d3vtools.getCatalog().then((value) => {
+    catalog = value;
+    render();
+  }).catch(() => render());
+});
 window.d3vtools.getAppVersion().then((value) => { version.textContent = `v${value}` }).catch(() => { version.textContent = 'v—' })
 poweredBy.onclick = () => void window.d3vtools.openWebsite()

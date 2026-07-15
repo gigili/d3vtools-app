@@ -1,12 +1,14 @@
 {
-  "name": "d3vtools-desktop",
-  "version": "0.1.0",
-  "description": "Linux-first desktop launcher for D3vTools",
+  "name": "d3vtools-app",
+  "version": "1.0.0",
+  "author": "D3vTools contributors",
+  "description": "A desktop app to allow for easy access to all of the tools from https://d3.tools",
   "private": true,
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev --noSandbox",
     "build": "electron-vite build",
+    "package": "npm run build && electron-builder --publish never",
     "preview": "electron-vite preview",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -14,11 +16,56 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "electron": "^43.1.0",
+    "electron-builder": "^26.0.12",
     "electron-vite": "^4.0.0",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
   },
   "dependencies": {
     "keytar": "^7.9.0"
+  },
+  "build": {
+    "appId": "tools.d3v.desktop",
+    "productName": "D3vTools",
+    "icon": "build/d3vtools-icon.png",
+    "files": [
+      "out/**/*",
+      "themes/**/*",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "build/d3vtools-icon.png",
+        "to": "icons/d3vtools-icon.png"
+      },
+      {
+        "from": "build/d3vtools-tray.png",
+        "to": "icons/d3vtools-tray.png"
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "linux": {
+      "category": "Utility",
+      "target": [
+        "deb",
+        "AppImage",
+        "flatpak",
+        "snap"
+      ]
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": "dmg"
+    }
   }
 }
