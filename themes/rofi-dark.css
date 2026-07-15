@@ -1,0 +1,13 @@
+/* Copy this file to ~/.config/d3vtools/themes/ and select it in config.json. */
+:root {
+  --d3vtools-background: #282c34;
+  --d3vtools-text: #bbc2cf;
+  --d3vtools-selection-border: #ae3f3e;
+  --d3vtools-accent: #51afef;
+}
+
+/* Override the built-in UI with your own CSS selectors as needed. */
+body { background: var(--d3vtools-background); color: var(--d3vtools-text); }
+#search { border-color: #1c1f24; background: #1c1f24; }
+#search:focus { border-color: var(--d3vtools-accent); }
+.result.selected { border-color: var(--d3vtools-selection-border); }
