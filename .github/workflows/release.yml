@@ -49,11 +49,10 @@ jobs:
         include:
           - name: Linux
             os: ubuntu-latest
-            target: --linux deb AppImage flatpak snap
+            target: --linux deb AppImage snap
             artifacts: |
               dist/*.deb
               dist/*.AppImage
-              dist/*.flatpak
               dist/*.snap
           - name: Windows
             os: windows-latest
@@ -80,7 +79,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder libsecret-1-dev pkg-config build-essential
+          sudo apt-get install -y libsecret-1-dev pkg-config build-essential
           sudo snap install snapcraft --classic
 
       - name: Install dependencies

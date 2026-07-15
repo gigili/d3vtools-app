@@ -17,8 +17,8 @@ The application currently provides:
 - Secure API-key storage through the operating system credential store.
 - Text, code, file, JSON, table, image, and downloadable output presentations where supported by the catalog.
 - Cached quota information, usage-limit warnings, and reset countdowns.
-- Linux packages (`.deb`, `.AppImage`, `.flatpak`, and `.snap`), a Windows installer (`.exe`), and a macOS disk image (
-  `.dmg`) on tagged releases.
+- Linux packages (`.deb`, `.AppImage`, and `.snap`), a Windows installer (`.exe`), and a macOS disk image (`.dmg`) on
+  tagged releases.
 
 The desktop app depends on a compatible d3v.tools API. The catalog and execution capabilities are intentionally
 server-driven, so a tool must be available from the configured API before it can be used here.
