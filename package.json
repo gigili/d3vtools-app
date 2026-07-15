@@ -1,7 +1,16 @@
 {
   "name": "d3vtools-app",
   "version": "1.0.0",
-  "author": "D3vTools contributors",
+  "author": {
+    "name": "Igor Ilic",
+    "email": "github@igorilic.net"
+  },
+  "homepage": "https://d3v.tools",
+  "bugs": {
+    "url": "https://github.com/gigili/d3vtools-app/issues",
+    "email": "github+d3vtools@igorilic.net"
+  },
+  "license": "MIT",
   "description": "A desktop app to allow for easy access to all of the tools from https://d3.tools",
   "private": true,
   "main": "out/main/index.js",
