@@ -13,14 +13,44 @@ export interface ToolDefinition {
   desktopSupported?: boolean
   resultType?: ResultType
   webFallbackUrl?: string
+	desktopUi?: DesktopToolUi;
+}
+
+export interface DesktopToolUi {
+	input?: {
+		accept?: string
+		multiple?: boolean
+		max_files?: number
+		max_bytes_per_file?: number
+	};
+	options?: Record<string, DesktopToolOption | Record<string, DesktopToolOption>>;
+}
+
+export interface DesktopToolOption {
+	type: "select" | "number" | "checkbox";
+	label?: string;
+	values?: string[];
+	default?: string | number | boolean;
+	placeholder?: string;
+	help?: string;
+	min?: number;
+	max?: number;
+	step?: number;
 }
 
 export interface ToolRequest {
   input?: string
   options?: Record<string, unknown>
+	files?: ToolFile[];
   from?: string
   to?: string
   value?: string
+}
+
+export interface ToolFile {
+	name: string;
+	type: string;
+	data: ArrayBuffer;
 }
 
 export interface ApiResult {
@@ -42,6 +72,11 @@ export interface RateLimitInfo {
 export interface AppSettings {
   apiBaseUrl: string
   shortcut: string
+}
+
+export interface UpdateInfo {
+	currentVersion: string;
+	latestVersion: string;
 }
 
 export interface UserConfig {

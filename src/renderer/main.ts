@@ -1,14 +1,22 @@
 /// <reference path="../preload/index.d.ts" />
 import {searchCatalog} from "../search/catalog";
-import type {ApiResult, AppSettings, RateLimitInfo, ToolDefinition, UserConfig} from "../shared/types";
+import type {
+	ApiResult,
+	AppSettings,
+	DesktopToolOption,
+	RateLimitInfo,
+	ToolDefinition,
+	ToolFile,
+	UserConfig
+} from "../shared/types";
 import {
-  displayValue,
-  inputModeFor,
-  isRecord,
-  outputFileFor,
-  parseStructuredResult,
-  presentationFor,
-  unwrapResult
+	displayValue,
+	inputModeFor,
+	isRecord,
+	outputFileFor,
+	parseStructuredResult,
+	presentationFor,
+	unwrapResult
 } from "./format";
 import {acceleratorForKeyEvent} from "./shortcut";
 import "./style.css";
@@ -26,6 +34,7 @@ const status = document.querySelector<HTMLElement>('#status')!
 const version = document.querySelector<HTMLElement>('#app-version')!
 const quota = document.querySelector<HTMLElement>('#quota')!
 const poweredBy = document.querySelector<HTMLButtonElement>('#powered-by')!
+const updateIndicator = document.querySelector<HTMLButtonElement>("#update-indicator")!;
 const settingsButton = document.querySelector<HTMLButtonElement>("#settings-button")!;
 const settingsModal = document.querySelector<HTMLElement>("#settings-modal")!;
 const settingsForm = document.querySelector<HTMLFormElement>("#settings-form")!;
@@ -154,6 +163,7 @@ settingsModal.onclick = (event) => {
 };
 settingsRemoveKey.onclick = async () => {
   await window.d3vtools.removeApiKey();
+	clearQuotaCache();
   settingsApiKey.value = "";
   settingsApiKeyStatus.textContent = "No API key configured; anonymous limits apply.";
   settingsRemoveKey.disabled = true;
@@ -236,21 +246,53 @@ function openTool(tool: ToolDefinition): void {
   input.value = "";
   input.placeholder = inputPlaceholder(tool).trimStart();
   inputPane.append(inputLabel)
+	let selectedFiles: ToolFile[] = [];
   if (inputMode === 'file' || inputMode === 'mixed') {
     const fileRow = document.createElement('div'); fileRow.className = 'file-row'
-    const file = document.createElement('input'); file.type = 'file'; file.className = 'file-input'; file.accept = '*/*'
+	  const file = document.createElement("input");
+	  file.type = "file";
+	  file.className = "file-input";
+	  file.accept = tool.desktopUi?.input?.accept ?? "*/*";
+	  file.multiple = tool.desktopUi?.input?.multiple ?? false;
     const fileName = document.createElement('span'); fileName.className = 'file-name'; fileName.textContent = 'Choose a file, or paste text below'
-    file.onchange = () => {
-      const selectedFile = file.files?.[0]
-      if (!selectedFile) return
-      fileName.textContent = selectedFile.name
+	  file.onchange = async () => {
+		  const files = [...(file.files ?? [])];
+		  if (!files.length) return;
+		  fileName.textContent = files.map((selectedFile) => selectedFile.name).join(", ");
       const identity = `${tool.name} ${tool.slug}`.toLowerCase()
+		  if (tool.slug === "image-convert") {
+			  selectedFiles = await Promise.all(files.map(async (selectedFile) => ({
+				  name: selectedFile.name,
+				  type: selectedFile.type,
+				  data: await selectedFile.arrayBuffer()
+			  })));
+			  return;
+		  }
+		  const selectedFile = files[0];
       if (/(?:image|jpg|jpeg|png)\s+to\s+base64|(?:image|jpg|jpeg|png)-to-base64/.test(identity)) {
-        void selectedFile.arrayBuffer().then((buffer) => { input.value = `data:${selectedFile.type || 'application/octet-stream'};base64,${arrayBufferToBase64(buffer)}` })
-      } else void selectedFile.text().then((text) => { input.value = text })
+		  const buffer = await selectedFile.arrayBuffer();
+	      input.value = `data:${selectedFile.type || "application/octet-stream"};base64,${arrayBufferToBase64(buffer)}`;
+	  } else input.value = await selectedFile.text();
     }
     fileRow.append(file, fileName); inputPane.append(fileRow)
   }
+	const optionControls = new Map<string, { element: HTMLInputElement | HTMLSelectElement; value: () => unknown }>();
+	if (tool.desktopUi?.options) {
+		Object.entries(tool.desktopUi.options).forEach(([key, definition]) => {
+			if (isRecord(definition) && "type" in definition) {
+				const control = optionControl(key, definition as unknown as DesktopToolOption);
+				optionControls.set(key, control);
+				inputPane.append(control.container);
+			} else if (key === "gif" && isRecord(definition)) {
+				Object.entries(definition).forEach(([nestedKey, nestedDefinition]) => {
+					if (!isRecord(nestedDefinition) || !("type" in nestedDefinition)) return;
+					const control = optionControl(`gif.${nestedKey}`, nestedDefinition as DesktopToolOption);
+					optionControls.set(`gif.${nestedKey}`, control);
+					inputPane.append(control.container);
+				});
+			}
+		});
+	}
   if (inputMode !== 'file') inputPane.append(input)
   const outputPane = document.createElement('section'); outputPane.className = 'pane output-pane'
   const outputTitle = document.createElement('div'); outputTitle.className = 'pane-title'; outputTitle.textContent = 'Output'
@@ -263,12 +305,30 @@ function openTool(tool: ToolDefinition): void {
   const execute = async (): Promise<void> => {
     run.disabled = true; run.textContent = 'Running…'; output.className = 'output loading'; output.textContent = 'Running…'
     try {
-      const response = await window.d3vtools.execute(tool.category, tool.slug, { input: input.value }) as ApiResult
+		const options = Object.fromEntries(Array.from(optionControls.entries()).map(([key, control]) => [key, control.value()]));
+		const nestedOptions = Object.entries(options).reduce<Record<string, unknown>>((result, [key, value]) => {
+			const [group, nestedKey] = key.split(".", 2);
+			if (!nestedKey) {
+			    result[key] = value;
+			    return result;
+		    }
+			const groupValue = isRecord(result[group]) ? result[group] : {};
+			result[group] = {...groupValue, [nestedKey]: value};
+			return result;
+		}, {});
+		const payload = selectedFiles.length
+			? {files: selectedFiles, options: nestedOptions}
+			: {input: input.value};
+		const response = await window.d3vtools.execute(tool.category, tool.slug, payload) as ApiResult;
       renderRateLimit(response.meta?.rate_limit)
       renderOutput(output, parseStructuredResult(unwrapResult(response)), presentation, tool)
     } catch (error) {
       output.className = "output error";
       if (isRateLimitError(error)) await renderRateLimitError(output);
+	  else if (isAuthenticationError(error) || isPremiumError(error)) {
+		  clearQuotaCache();
+		  await renderAccessError(output, isAuthenticationError(error));
+	  }
       else output.textContent = friendlyErrorMessage(error);
     }
     finally { run.disabled = false; run.textContent = 'Run' }
@@ -276,6 +336,50 @@ function openTool(tool: ToolDefinition): void {
   run.onclick = () => void execute()
   input.addEventListener('keydown', (event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') void execute() })
   void resizeForTool();
+}
+
+function optionControl(key: string, definition: DesktopToolOption): {
+	container: HTMLElement;
+	element: HTMLInputElement | HTMLSelectElement;
+	value: () => unknown
+} {
+	const container = document.createElement("label");
+	container.className = "tool-option";
+	const title = document.createElement("span");
+	title.className = "tool-option-label";
+	title.textContent = definition.label ?? optionLabel(key);
+	container.append(title);
+	if (definition.type === "select") {
+		const element = document.createElement("select");
+		element.className = "tool-select"
+		;(definition.values ?? []).forEach((value) => element.append(new Option(value.toUpperCase(), value)));
+		if (definition.default !== undefined) element.value = String(definition.default);
+		container.append(element);
+		return {container, element, value: () => element.value};
+	}
+	const element = document.createElement("input");
+	element.type = definition.type === "checkbox" ? "checkbox" : "number";
+	element.className = "tool-option-input";
+	if (definition.min !== undefined) element.min = String(definition.min);
+	if (definition.max !== undefined) element.max = String(definition.max);
+	if (definition.step !== undefined) element.step = String(definition.step);
+	if (definition.placeholder !== undefined) element.placeholder = definition.placeholder;
+	if (definition.default !== undefined) {
+		if (element.type === "checkbox") element.checked = Boolean(definition.default);
+		else element.value = String(definition.default);
+	}
+	container.append(element);
+	if (definition.help) {
+		const help = document.createElement("small");
+		help.className = "tool-option-help";
+		help.textContent = definition.help;
+		container.append(help);
+	}
+	return {container, element, value: () => element.type === "checkbox" ? element.checked : element.value};
+}
+
+function optionLabel(key: string): string {
+	return key.split(".").map((part) => part.replaceAll("_", " ")).join(" ").replace(/\b[a-z]/g, (letter) => letter.toUpperCase()).replace(/^Gif\b/, "GIF");
 }
 
 function inputPlaceholder(tool: ToolDefinition): string {
@@ -320,6 +424,29 @@ function isRateLimitError(error: unknown): boolean {
   return /\b429\b|rate limit|too many requests/i.test(message);
 }
 
+function isPremiumError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : "";
+	return /\b403\b|premium subscription|premium access|subscription required/i.test(message);
+}
+
+function isAuthenticationError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : "";
+	return /\b401\b|unauthenticated|unauthorized/i.test(message);
+}
+
+async function renderAccessError(container: HTMLElement, authenticationFailed: boolean): Promise<void> {
+	const hasApiKey = await window.d3vtools.hasApiKey().catch(() => false);
+	const message = document.createElement("p");
+	message.textContent = authenticationFailed && hasApiKey
+		? "Your API key could not be authenticated. Check your key or subscription."
+		: "This tool requires an API key with an active premium subscription.";
+	const action = button(hasApiKey ? "Manage subscription" : "Get premium access", "primary-button");
+	action.onclick = () => {
+		void window.d3vtools.openAccount(hasApiKey ? "billing" : "app");
+	};
+	container.replaceChildren(message, action);
+}
+
 async function renderRateLimitError(container: HTMLElement): Promise<void> {
   const hasApiKey = await window.d3vtools.hasApiKey().catch(() => false);
   const message = document.createElement("p");
@@ -338,8 +465,9 @@ function updateQuotaDisplay(): void {
     quotaTimer = undefined;
   }
   const elapsed = Math.max(0, Math.floor((Date.now() - cachedQuota.observedAt) / 1000));
+	const remaining = cachedQuota.remaining ?? 0;
   const resetIn = typeof cachedQuota.resets_in_seconds === "number" ? Math.max(0, cachedQuota.resets_in_seconds - elapsed) : null;
-  if (cachedQuota.remaining <= 0 && resetIn === 0) {
+	if (remaining <= 0 && resetIn === 0) {
     cachedQuota = null;
     try {
       localStorage.removeItem(quotaCacheKey);
@@ -349,18 +477,36 @@ function updateQuotaDisplay(): void {
     quota.textContent = quotaDefaultText;
     return;
   }
-  const warning = cachedQuota.remaining <= 0;
+	const warning = remaining <= 0;
   quota.classList.toggle("quota-warning", warning);
   if (warning) {
     quota.textContent = resetIn === null ? "Usage limit reached" : `Usage limit reached · resets in ${formatDuration(resetIn)}`;
   } else {
     const reset = resetIn === null || resetIn === 0 ? "" : ` · resets in ${formatDuration(resetIn)}`;
-    quota.textContent = `${cachedQuota.remaining}/${cachedQuota.limit} requests left${cachedQuota.tier ? ` · ${cachedQuota.tier}` : ""}${reset}`;
+	  quota.textContent = `${remaining}/${cachedQuota.limit ?? 0} requests left${cachedQuota.tier ? ` · ${cachedQuota.tier}` : ""}${reset}`;
   }
   if (resetIn !== null && resetIn > 0) quotaTimer = window.setInterval(updateQuotaDisplay, 1000);
 }
 
-function restoreCachedQuota(): void {
+function clearQuotaCache(): void {
+	cachedQuota = null;
+	if (quotaTimer !== undefined) {
+		window.clearInterval(quotaTimer);
+		quotaTimer = undefined;
+	}
+	try {
+		localStorage.removeItem(quotaCacheKey);
+	} catch { /* storage may be unavailable */
+	}
+	quota.classList.remove("quota-warning");
+	quota.textContent = quotaDefaultText;
+}
+
+async function restoreCachedQuota(): Promise<void> {
+	if (!(await window.d3vtools.hasApiKey().catch(() => false))) {
+		clearQuotaCache();
+		return;
+	}
   try {
     const saved = JSON.parse(localStorage.getItem(quotaCacheKey) ?? "null") as (RateLimitInfo & {
       observedAt?: number
@@ -374,6 +520,10 @@ function restoreCachedQuota(): void {
 }
 
 function renderOutput(container: HTMLElement, value: unknown, presentation: string, tool: ToolDefinition): void {
+	if (tool.slug === "image-convert" && isConversionResult(value)) {
+		renderConversionOutput(container, value);
+		return;
+	}
   container.replaceChildren(); container.className = `output ${presentation}`
   const toolbar = document.createElement('div'); toolbar.className = 'output-toolbar'
   const copy = button('Copy', 'secondary-button'); copy.onclick = async () => { await navigator.clipboard.writeText(displayValue(value)); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy' }, 1200) }
@@ -398,6 +548,39 @@ function renderOutput(container: HTMLElement, value: unknown, presentation: stri
   } else {
     const pre = document.createElement('pre'); pre.textContent = displayValue(value); container.append(toolbar, pre)
   }
+}
+
+function isConversionResult(value: unknown): value is {
+	files: Array<{ name: string; mime_type: string; data_uri?: string }>
+} {
+	return isRecord(value) && Array.isArray(value.files);
+}
+
+function renderConversionOutput(container: HTMLElement, job: {
+	files: Array<{ name: string; mime_type: string; data_uri?: string }>
+}): void {
+	container.replaceChildren();
+	container.className = "output download";
+	const files = job.files.filter((file) => file.data_uri);
+	if (!files.length) {
+		container.append(renderPlainPreview("Conversion completed, but no output files were returned."));
+		return;
+	}
+	files.forEach((file) => {
+		const row = document.createElement("div");
+		row.className = "conversion-file";
+		const preview = document.createElement("img");
+		preview.className = "image-preview";
+		preview.src = file.data_uri!;
+		preview.alt = file.name;
+		const download = button(`Download ${file.name}`, "secondary-button");
+		download.onclick = () => saveOutput(file.data_uri, {slug: file.name} as ToolDefinition, {
+			extension: file.name.split(".").pop() ?? "bin",
+			mime: file.mime_type
+		});
+		row.append(preview, download);
+		container.append(row);
+	});
 }
 
 function saveOutput(value: unknown, tool: ToolDefinition, file: { extension: string; mime: string }): void {
@@ -458,7 +641,7 @@ function renderTable(rows: Array<Record<string, unknown>>): HTMLElement {
 
 function escapeHtml(value: string): string { return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]!) }
 search.addEventListener('input', () => { selected = 0; render() })
-restoreCachedQuota();
+void restoreCachedQuota();
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     if (!settingsModal.hidden) closeSettings(); else void window.d3vtools.hideWindow();
@@ -505,3 +688,11 @@ applyTheme().finally(() => {
 });
 window.d3vtools.getAppVersion().then((value) => { version.textContent = `v${value}` }).catch(() => { version.textContent = 'v—' })
 poweredBy.onclick = () => void window.d3vtools.openWebsite()
+updateIndicator.onclick = () => void window.d3vtools.openLatestRelease();
+void window.d3vtools.checkForUpdate().then((update) => {
+	if (!update) return;
+	updateIndicator.title = `New version available: v${update.latestVersion}`;
+	updateIndicator.setAttribute("aria-label", `New version available: v${update.latestVersion}`);
+	updateIndicator.hidden = false;
+}).catch(() => {
+});

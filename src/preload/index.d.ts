@@ -1,4 +1,4 @@
-import type { AppSettings, ApiResult, ToolDefinition, ToolRequest, UserConfig } from '../shared/types'
+import type { AppSettings, ApiResult, ToolDefinition, ToolRequest, UpdateInfo, UserConfig } from '../shared/types'
 
 declare global {
   interface Window { d3vtools: {
@@ -17,6 +17,8 @@ declare global {
     hasApiKey(): Promise<boolean>
     getCatalog(): Promise<ToolDefinition[]>
     getAppVersion(): Promise<string>
+    checkForUpdate(): Promise<UpdateInfo | null>
+    openLatestRelease(): Promise<void>
     openWebsite(): Promise<void>
     openAccount(destination: 'app' | 'billing'): Promise<void>
     execute(category: string, tool: string, payload: ToolRequest): Promise<ApiResult>

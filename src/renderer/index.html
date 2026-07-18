@@ -11,7 +11,11 @@
     </div>
     <section id="results"></section>
     <p id="status" class="sr-only">Loading catalog…</p>
-    <footer id="app-footer"><span id="app-version">v—</span>
+    <footer id="app-footer">
+        <span class="footer-version">
+            <span id="app-version" style="margin-right: 8px">v—</span>
+            <button id="update-indicator" type="button" hidden title="New version available" aria-label="New version available">↑</button>
+        </span>
         <button id="powered-by" type="button">Powered by: d3v.tools</button>
         <span id="quota">Requests: run a tool to check quota</span></footer>
 </main>

@@ -6,6 +6,7 @@ import {CatalogCache} from "../api/catalog-cache";
 import {UserConfigStore} from "../settings/config";
 import {SettingsStore} from "../settings/store";
 import type {AppSettings, ToolRequest} from "../shared/types";
+import {latestReleaseFor} from "../update/check";
 
 let window: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -88,6 +89,25 @@ app.whenReady().then(async () => {
     if (error) throw new Error(error);
   });
   ipcMain.handle('app:version', () => app.getVersion())
+	ipcMain.handle("update:check", async () => {
+		try {
+			const response = await fetch("https://api.github.com/repos/gigili/d3vtools-app/releases/latest", {
+				headers: {
+					Accept: "application/vnd.github+json",
+					"User-Agent": "D3vTools-Desktop"
+				}
+			});
+			if (!response.ok) return null;
+			return latestReleaseFor(app.getVersion(), await response.json() as {
+				tag_name?: string;
+				draft?: boolean;
+				prerelease?: boolean
+			});
+		} catch {
+			return null;
+		}
+	});
+	ipcMain.handle("update:open", () => shell.openExternal("https://github.com/gigili/d3vtools-app/releases/latest"));
   ipcMain.handle('app:open-website', () => shell.openExternal('https://d3v.tools'))
   ipcMain.handle("app:open-account", (_event, destination: "app" | "billing") => shell.openExternal(destination === "billing" ? "https://d3v.tools/app/billing" : "https://d3v.tools/app"));
   ipcMain.handle('window:hide', () => window?.hide())

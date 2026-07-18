@@ -1,5 +1,5 @@
 import {contextBridge, ipcRenderer} from "electron";
-import type {AppSettings, ToolRequest, UserConfig} from "../shared/types";
+import type {AppSettings, ToolRequest, UpdateInfo, UserConfig} from "../shared/types";
 
 contextBridge.exposeInMainWorld('d3vtools', {
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('d3vtools', {
   hasApiKey: (): Promise<boolean> => ipcRenderer.invoke("api-key:has"),
   getCatalog: () => ipcRenderer.invoke('catalog:get'),
   getAppVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
+	checkForUpdate: (): Promise<UpdateInfo | null> => ipcRenderer.invoke("update:check"),
+	openLatestRelease: (): Promise<void> => ipcRenderer.invoke("update:open"),
   openWebsite: (): Promise<void> => ipcRenderer.invoke('app:open-website'),
   openAccount: (destination: "app" | "billing"): Promise<void> => ipcRenderer.invoke("app:open-account", destination),
   execute: (category: string, tool: string, payload: ToolRequest) => ipcRenderer.invoke('tool:execute', category, tool, payload)
