@@ -1,3 +1,15 @@
+# 1.0.1
+
+Improved premium tool support and desktop release discoverability.
+
+### Added
+
+- Premium Image Converter support with API-key subscription access checks.
+- Image conversion options for output format, quality, resizing, and GIF settings.
+- Automatic conversion polling with image previews and downloads.
+- Friendly validation and authentication error messages with account CTAs.
+- Non-blocking update indicator linking to the latest GitHub release.
+
 # 1.0.0
 
 Initial public release of D3vTools Desktop.
