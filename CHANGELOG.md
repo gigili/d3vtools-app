@@ -1,3 +1,20 @@
+# 1.0.2
+
+Expanded document tooling and improved packaged app reliability.
+
+### Added
+
+- PDF tool support with merge, split, extract, remove, reorder, and rotate actions.
+- OCR tool support for PDF and common image formats.
+- Multi-file uploads and configurable PDF action rows in the desktop workspace.
+
+### Fixed
+
+- Missing application icons across Linux, Windows, macOS, development, and packaged builds.
+- Conversion job handling for document tools, including longer polling and clearer API errors.
+- Multipart form submission for nested arrays such as PDF page selections.
+- Output previews and downloads for text and document conversion results.
+
 # 1.0.1
 
 Improved premium tool support and desktop release discoverability.
