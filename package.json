@@ -36,7 +36,6 @@
   "build": {
     "appId": "tools.d3v.desktop",
     "productName": "D3vTools",
-    "desktopName": "d3vtools-app",
     "icon": "build/d3vtools-tray.png",
     "files": [
       "out/**/*",
