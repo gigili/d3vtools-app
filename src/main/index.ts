@@ -14,10 +14,26 @@ const settings = new SettingsStore()
 const catalogCache = new CatalogCache()
 const userConfig = new UserConfigStore()
 
+function appIconPath(): string {
+	const fileName = process.platform === "linux" ? "d3vtools-tray.svg" : "d3vtools-tray.png";
+	return app.isPackaged
+		? join(process.resourcesPath, "icons", fileName)
+		: join(app.getAppPath(), "build", fileName);
+}
+
 async function createWindow(): Promise<void> {
   const config = await userConfig.get()
   await setStartOnStartup(config.startOnStartup);
-  window = new BrowserWindow({ width: config.windowWidth, height: config.windowHeight, show: false, frame: false, resizable: true, transparent: true, hasShadow: false, alwaysOnTop: config.alwaysOnTop,
+	window = new BrowserWindow({
+		width: config.windowWidth,
+		height: config.windowHeight,
+		show: false,
+		frame: false,
+		resizable: true,
+		transparent: true,
+		hasShadow: false,
+		alwaysOnTop: config.alwaysOnTop,
+		icon: appIconPath(),
     // i3 treats Linux toolbar windows as floating while keeping them resizable.
     ...(process.platform === 'linux' ? { type: 'toolbar' } : {}),
     webPreferences: { preload: join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false } })

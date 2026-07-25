@@ -31,13 +31,13 @@ export class D3vToolsApi {
           : {"Content-Type": "application/json", Accept: "application/json"}
     })
     const result = await response.json() as ApiResult;
-    if (tool === "image-convert" && isConversionJob(result.data)) return this.waitForConversion(result);
+    if (isConversionJob(result.data)) return this.waitForConversion(result);
     return result;
   }
 
   private async waitForConversion(result: ApiResult): Promise<ApiResult> {
     const job = result.data as ConversionJob;
-    for (let attempt = 0; attempt < 80; attempt += 1) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
       const response = await this.request(`/api/v1/conversions/${encodeURIComponent(job.id)}`, {headers: {Accept: "application/json"}});
       const payload = await response.json() as { data: ConversionJob };
       if (payload.data.status === "completed") {
@@ -48,7 +48,7 @@ export class D3vToolsApi {
         }));
         return {...result, data: {files}};
       }
-      if (["failed", "canceled", "expired"].includes(payload.data.status)) throw new Error("Image conversion could not be completed. Check your files and options, then try again.");
+      if (["failed", "canceled", "expired"].includes(payload.data.status)) throw new Error(payload.data.error_message ?? "Document conversion could not be completed. Check your files and options, then try again.");
       await new Promise((resolve) => setTimeout(resolve, 1500));
     }
     throw new Error("Image conversion is taking longer than expected. Please try again later.");
@@ -60,6 +60,10 @@ export class D3vToolsApi {
     payload.files?.forEach((file) => form.append("files[]", new Blob([file.data], {type: file.type || "application/octet-stream"}), file.name));
     const appendOption = (value: unknown, path: string): void => {
       if (value === undefined || value === null) return;
+      if (Array.isArray(value)) {
+        value.forEach((nestedValue, index) => appendOption(nestedValue, `${path}[${index}]`));
+        return;
+      }
       if (typeof value === "object" && !Array.isArray(value)) {
         Object.entries(value).forEach(([key, nestedValue]) => appendOption(nestedValue, `${path}[${key}]`));
         return;

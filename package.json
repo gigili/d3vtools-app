@@ -1,6 +1,6 @@
 {
   "name": "d3vtools-app",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": {
     "name": "Igor Ilic",
     "email": "github@igorilic.net"
@@ -25,7 +25,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "electron": "^43.1.0",
-    "electron-builder": "^26.0.12",
+    "electron-builder": "^26.15.7",
     "electron-vite": "^4.0.0",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
@@ -36,7 +36,8 @@
   "build": {
     "appId": "tools.d3v.desktop",
     "productName": "D3vTools",
-    "icon": "build/d3vtools-icon.png",
+    "desktopName": "d3vtools-app",
+    "icon": "build/d3vtools-tray.png",
     "files": [
       "out/**/*",
       "themes/**/*",
@@ -45,12 +46,12 @@
     ],
     "extraResources": [
       {
-        "from": "build/d3vtools-icon.png",
-        "to": "icons/d3vtools-icon.png"
-      },
-      {
         "from": "build/d3vtools-tray.png",
         "to": "icons/d3vtools-tray.png"
+      },
+      {
+        "from": "build/d3vtools-tray.svg",
+        "to": "icons/d3vtools-tray.svg"
       }
     ],
     "directories": {
@@ -58,12 +59,15 @@
     },
     "linux": {
       "category": "Utility",
+      "icon": "build/icons",
+      "syncDesktopName": true,
       "target": [
         "deb",
         "AppImage"
       ]
     },
     "win": {
+      "icon": "build/d3vtools-tray.png",
       "target": "nsis"
     },
     "nsis": {
@@ -72,6 +76,7 @@
     },
     "mac": {
       "category": "public.app-category.utilities",
+      "icon": "build/d3vtools-tray.png",
       "target": "dmg"
     }
   }

@@ -63,4 +63,29 @@ describe('D3vToolsApi catalog normalization', () => {
 		expect((body.get("files[]") as File).name).toBe("input.png");
 		fetchMock.mockRestore();
 	});
+
+	it("sends PDF actions and nested arrays as multipart form data", async () => {
+		const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+			success: true,
+			data: {}
+		}), {status: 200}));
+		const fileData = new TextEncoder().encode("pdf-data").buffer;
+		await new D3vToolsApi("https://d3v.tools", async () => "test-key").execute("pdf-tools", "pdf-workbench", {
+			files: [{name: "input.pdf", type: "application/pdf", data: fileData}],
+			options: {
+				actions: [
+					{type: "merge"},
+					{type: "remove", pages: [0, 2]},
+					{type: "rotate", angle: 90}
+				]
+			}
+		});
+		const body = fetchMock.mock.calls[0][1]!.body as FormData;
+		expect(body.get("options[actions][0][type]")).toBe("merge");
+		expect(body.getAll("options[actions][1][pages][]")).toEqual([]);
+		expect(body.get("options[actions][1][pages][0]")).toBe("0");
+		expect(body.get("options[actions][1][pages][1]")).toBe("2");
+		expect(body.get("options[actions][2][angle]")).toBe("90");
+		fetchMock.mockRestore();
+	});
 })

@@ -238,7 +238,9 @@ function openTool(tool: ToolDefinition): void {
   header.append(back, heading);
 
   const workspace = document.createElement('div'); workspace.className = 'workspace'
-  const inputPane = document.createElement('section'); inputPane.className = 'pane input-pane'
+	const inputPane = document.createElement("section");
+	inputPane.className = "pane input-pane";
+	const desktopUi = desktopUiFor(tool);
   const inputLabel = document.createElement('label'); inputLabel.className = 'pane-title'; inputLabel.textContent = 'Input'
   const input = document.createElement("textarea");
   input.id = "tool-input";
@@ -252,15 +254,15 @@ function openTool(tool: ToolDefinition): void {
 	  const file = document.createElement("input");
 	  file.type = "file";
 	  file.className = "file-input";
-	  file.accept = tool.desktopUi?.input?.accept ?? "*/*";
-	  file.multiple = tool.desktopUi?.input?.multiple ?? false;
+	  file.accept = desktopUi?.input?.accept ?? "*/*";
+	  file.multiple = desktopUi?.input?.multiple ?? false;
     const fileName = document.createElement('span'); fileName.className = 'file-name'; fileName.textContent = 'Choose a file, or paste text below'
 	  file.onchange = async () => {
 		  const files = [...(file.files ?? [])];
 		  if (!files.length) return;
 		  fileName.textContent = files.map((selectedFile) => selectedFile.name).join(", ");
       const identity = `${tool.name} ${tool.slug}`.toLowerCase()
-		  if (tool.slug === "image-convert") {
+		  if (tool.type === "server" || tool.category === "pdf-tools" || tool.category === "ocr") {
 			  selectedFiles = await Promise.all(files.map(async (selectedFile) => ({
 				  name: selectedFile.name,
 				  type: selectedFile.type,
@@ -277,8 +279,13 @@ function openTool(tool: ToolDefinition): void {
     fileRow.append(file, fileName); inputPane.append(fileRow)
   }
 	const optionControls = new Map<string, { element: HTMLInputElement | HTMLSelectElement; value: () => unknown }>();
-	if (tool.desktopUi?.options) {
-		Object.entries(tool.desktopUi.options).forEach(([key, definition]) => {
+	if (tool.category === "pdf-tools") {
+		const control = pdfActionControl(tool);
+		optionControls.set("actions", control);
+		inputPane.append(control.container);
+	}
+	if (desktopUi?.options) {
+		Object.entries(desktopUi.options).forEach(([key, definition]) => {
 			if (isRecord(definition) && "type" in definition) {
 				const control = optionControl(key, definition as unknown as DesktopToolOption);
 				optionControls.set(key, control);
@@ -336,6 +343,96 @@ function openTool(tool: ToolDefinition): void {
   run.onclick = () => void execute()
   input.addEventListener('keydown', (event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') void execute() })
   void resizeForTool();
+}
+
+function desktopUiFor(tool: ToolDefinition): ToolDefinition["desktopUi"] {
+	if (tool.desktopUi) return tool.desktopUi;
+	if (tool.category === "pdf-tools") return {
+		input: {
+			accept: ".pdf,application/pdf",
+			multiple: true,
+			max_files: 20,
+			max_bytes_per_file: 209715200
+		}
+	};
+	if (tool.category === "ocr") return {
+		input: {
+			accept: ".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp",
+			multiple: false,
+			max_files: 10,
+			max_bytes_per_file: 209715200
+		}
+	};
+	return undefined;
+}
+
+function pdfActionControl(tool: ToolDefinition): {
+	container: HTMLElement;
+	element: HTMLInputElement | HTMLSelectElement;
+	value: () => unknown
+} {
+	const container = document.createElement("div");
+	container.className = "tool-option pdf-action-option";
+	const label = document.createElement("span");
+	label.className = "tool-option-label";
+	label.textContent = "PDF actions";
+	const rows = document.createElement("div");
+	rows.className = "pdf-action-list";
+	const add = button("+ Add action", "text-button");
+	const defaultAction = tool.slug === "pdf-workbench" ? "merge" : tool.slug.replace(/-pdf(?:-pages)?$/, "");
+	const actionNames = ["merge", "split", "extract", "remove", "reorder", "rotate"];
+	const addRow = (selectedAction: string): void => {
+		const row = document.createElement("div");
+		row.className = "pdf-action-row";
+		const actionType = document.createElement("select");
+		actionType.className = "tool-select";
+		actionNames.forEach((value) => actionType.append(new Option(value.toUpperCase(), value)));
+		actionType.value = actionNames.includes(selectedAction) ? selectedAction : "merge";
+		const pages = document.createElement("input");
+		pages.className = "tool-option-input";
+		pages.placeholder = "Pages (e.g. 1, 3-5)";
+		const angle = document.createElement("select");
+		angle.className = "tool-select";
+		[90, 180, 270, -90, -180, -270].forEach((value) => angle.append(new Option(`${value}°`, String(value))));
+		const remove = button("Remove", "text-button");
+		remove.onclick = () => {
+			if (rows.children.length > 1) row.remove();
+		};
+		const refresh = (): void => {
+			pages.hidden = !["split", "extract", "remove", "reorder"].includes(actionType.value);
+			angle.hidden = actionType.value !== "rotate";
+		};
+		actionType.onchange = refresh;
+		row.append(actionType, pages, angle, remove);
+		rows.append(row);
+		refresh();
+	};
+	add.onclick = () => addRow("merge");
+	addRow(defaultAction);
+	container.append(label, rows, add);
+	return {
+		container,
+		element: rows.querySelector<HTMLSelectElement>("select")!,
+		value: () => Array.from(rows.children).map((row) => {
+			const actionType = row.querySelector<HTMLSelectElement>("select")!;
+			const pages = row.querySelector<HTMLInputElement>("input")!;
+			const angle = row.querySelectorAll<HTMLSelectElement>("select")[1];
+			const result: Record<string, unknown> = {type: actionType.value};
+			const numbers = pages.value.split(",").flatMap((part) => {
+				const [start, end] = part.trim().split("-").map(Number);
+				if (!Number.isInteger(start)) return [];
+				if (!Number.isInteger(end)) return [start - 1];
+				return Array.from({length: Math.max(0, end - start + 1)}, (_, index) => start - 1 + index);
+			});
+			if (["extract", "remove", "reorder"].includes(actionType.value)) result.pages = numbers;
+			if (actionType.value === "split") result.ranges = pages.value.split(",").map((part) => {
+				const [start, end] = part.trim().split("-").map(Number);
+				return Number.isInteger(end) ? `${start - 1}-${end - 1}` : String(start - 1);
+			}).filter(Boolean);
+			if (actionType.value === "rotate") result.angle = Number(angle?.value ?? 90);
+			return result;
+		})
+	};
 }
 
 function optionControl(key: string, definition: DesktopToolOption): {
@@ -520,7 +617,7 @@ async function restoreCachedQuota(): Promise<void> {
 }
 
 function renderOutput(container: HTMLElement, value: unknown, presentation: string, tool: ToolDefinition): void {
-	if (tool.slug === "image-convert" && isConversionResult(value)) {
+	if (isConversionResult(value)) {
 		renderConversionOutput(container, value);
 		return;
 	}
@@ -569,10 +666,10 @@ function renderConversionOutput(container: HTMLElement, job: {
 	files.forEach((file) => {
 		const row = document.createElement("div");
 		row.className = "conversion-file";
-		const preview = document.createElement("img");
-		preview.className = "image-preview";
-		preview.src = file.data_uri!;
-		preview.alt = file.name;
+		const preview = document.createElement(file.mime_type.startsWith("text/") || file.mime_type.includes("json") ? "pre" : "span");
+		preview.className = file.mime_type.startsWith("text/") || file.mime_type.includes("json") ? "conversion-preview" : "conversion-file-name";
+		if (preview instanceof HTMLPreElement) preview.textContent = decodeTextDataUri(file.data_uri!);
+		else preview.textContent = file.name;
 		const download = button(`Download ${file.name}`, "secondary-button");
 		download.onclick = () => saveOutput(file.data_uri, {slug: file.name} as ToolDefinition, {
 			extension: file.name.split(".").pop() ?? "bin",
@@ -584,7 +681,7 @@ function renderConversionOutput(container: HTMLElement, job: {
 }
 
 function saveOutput(value: unknown, tool: ToolDefinition, file: { extension: string; mime: string }): void {
-  const dataUri = imageFromDataUri(value)
+	const dataUri = typeof value === "string" && /^data:[^,]+,/i.test(value) ? value : null;
   const blob = dataUri ? dataUriToBlob(dataUri) : new Blob([displayValue(value)], { type: file.mime })
   const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `${tool.slug}-output.${file.extension}`; link.click(); URL.revokeObjectURL(link.href)
 }
@@ -605,6 +702,16 @@ function dataUriToBlob(uri: string): Blob {
   const [header, encoded] = uri.split(',', 2); const mime = header.match(/^data:([^;]+)/i)?.[1] ?? 'application/octet-stream'; const binary = atob(encoded); const bytes = new Uint8Array(binary.length)
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
   return new Blob([bytes], { type: mime })
+}
+
+function decodeTextDataUri(uri: string): string {
+	const encoded = uri.split(",", 2)[1] ?? "";
+	try {
+		const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+		return new TextDecoder().decode(bytes);
+	} catch {
+		return encoded;
+	}
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
