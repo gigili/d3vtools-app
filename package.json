@@ -75,7 +75,7 @@
     },
     "mac": {
       "category": "public.app-category.utilities",
-      "icon": "build/d3vtools-tray.png",
+      "icon": "build/d3vtools-icon.png",
       "target": "dmg"
     }
   }
